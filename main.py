@@ -53,18 +53,22 @@ logger = structlog.get_logger(__name__)
 settings = Settings()
 
 
+@functools.lru_cache()
 def get_client() -> CfClient:
-    return CfClient(
+    client = CfClient(
         settings.API_KEY,
         with_base_url(settings.RELAY_BASE_URL),
         with_events_url(settings.RELAY_EVENTS_URL),
         with_stream_enabled(True),
         with_analytics_enabled(True),
     )
+    client.authenticate()
+    return client
 
 
 app = FastAPI()
 configure_logging()
+get_client()  # try to initialise the client on startup
 
 
 class FlagRequest(BaseModel):
