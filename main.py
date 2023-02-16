@@ -26,7 +26,7 @@ WEBSOCKET_PING_SECONDS = 30
 
 
 def configure_logging(log_level: int = logging.INFO) -> None:
-    harness_logger.setLevel(logging.CRITICAL)
+    harness_logger.setLevel(logging.WARNING)
     structlog.configure(
         processors=[
             structlog.contextvars.merge_contextvars,
@@ -106,10 +106,12 @@ def _get_variation_callable(details: FlagRequest | None, client: CfClient) -> pa
     )
     return functools.partial(variation_callable, default=default)
 
+
 class FlagValueResponse(BaseModel):
     flag_id: str
     flag_value: typing.Any
     target_id: str
+
 
 @app.get("/{flag_id}/{target_id}", response_model=FlagValueResponse)
 async def get_feature_flag(
@@ -147,6 +149,12 @@ async def post_feature_flag(
         target_attributes=details.target_attributes if details else None,
     )
     return FlagValueResponse(flag_id=flag_id, flag_value=result, target_id=target_id)
+
+
+@app.post("/reauthenticate")
+async def force_reauth(client: CfClient = Depends(get_client)):
+    client.authenticate()
+    return {}
 
 
 class FlagState(BaseModel):
