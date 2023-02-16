@@ -25,18 +25,51 @@ WEBSOCKET_MAX_CONNECTION_TIME = 60 * 30  # 30 minutes
 WEBSOCKET_PING_SECONDS = 30
 
 
+SHARED_PROCESSORS = [
+    structlog.processors.add_log_level,
+    structlog.stdlib.add_logger_name,
+    structlog.processors.TimeStamper(fmt="iso"),
+    structlog.processors.format_exc_info,
+]
+
+
 def configure_logging(log_level: int = logging.INFO) -> None:
-    harness_logger.setLevel(logging.WARNING)
     structlog.configure(
         processors=[
+            *SHARED_PROCESSORS,
             structlog.contextvars.merge_contextvars,
-            structlog.processors.add_log_level,
-            structlog.processors.TimeStamper(fmt="iso"),
-            structlog.processors.format_exc_info,
-            structlog.processors.JSONRenderer(),
+            structlog.stdlib.ProcessorFormatter.wrap_for_formatter,
         ],
+        logger_factory=structlog.stdlib.LoggerFactory(),
         wrapper_class=structlog.make_filtering_bound_logger(log_level),
     )
+
+    formatter = structlog.stdlib.ProcessorFormatter(
+        # run only on non-structlog logs
+        foreign_pre_chain=SHARED_PROCESSORS,
+        # run on everything
+        processors=[
+            structlog.stdlib.ProcessorFormatter.remove_processors_meta,
+            structlog.processors.JSONRenderer(),
+        ],
+    )
+    handler = logging.StreamHandler()
+    handler.setFormatter(formatter)
+
+    def _configure_external_logger(external_logger: logging.Logger, level: int) -> None:
+        external_logger.handlers.clear()
+        external_logger.addHandler(handler)
+        external_logger.setLevel(level)
+
+    # explicitly set the only handler for the root loggen and uvicorn
+    _configure_external_logger(logging.getLogger(), level=log_level)
+    _configure_external_logger(logging.getLogger("uvicorn.access"), level=logging.INFO)
+    _configure_external_logger(logging.getLogger("uvicorn.default"), level=logging.INFO)
+
+    # clear out existing loggers for harness and filter to warnings
+    # this means that harness logging will be configured by the root logger
+    harness_logger.handlers.clear()
+    harness_logger.setLevel(logging.WARNING)
 
 
 class Settings(BaseSettings):
@@ -67,8 +100,6 @@ def get_client() -> CfClient:
 
 
 app = FastAPI()
-configure_logging()
-get_client()  # try to initialise the client on startup
 
 
 class FlagRequest(BaseModel):
@@ -82,9 +113,15 @@ def healthcheck():
     return {}
 
 
+@app.on_event("startup")
+def startup_event():
+    configure_logging()
+    get_client()  # try to initialise the client on startup
+
+
 @app.on_event("shutdown")
-def shutdown_event(client: CfClient = Depends(get_client)):
-    client.close()
+def shutdown_event():
+    get_client().close()
     logger.info("Closed Harness client")
 
 
