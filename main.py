@@ -82,6 +82,12 @@ def healthcheck():
     return {}
 
 
+@app.on_event("shutdown")
+def shutdown_event(client: CfClient = Depends(get_client)):
+    client.close()
+    logger.info("Closed Harness client")
+
+
 def _build_target(target_id: str, details: FlagRequest | None) -> Target:
     if details:
         return Target(
