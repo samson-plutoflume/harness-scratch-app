@@ -49,6 +49,15 @@ def configure_logging(log_level: int = logging.INFO) -> None:
         foreign_pre_chain=SHARED_PROCESSORS,
         # run on everything
         processors=[
+            structlog.processors.CallsiteParameterAdder(
+                parameters={
+                    structlog.processors.CallsiteParameter.FUNC_NAME,
+                    structlog.processors.CallsiteParameter.PATHNAME,
+                    structlog.processors.CallsiteParameter.LINENO,
+                    structlog.processors.CallsiteParameter.THREAD_NAME,
+                    structlog.processors.CallsiteParameter.PROCESS_NAME,
+                }
+            ),
             structlog.stdlib.ProcessorFormatter.remove_processors_meta,
             structlog.processors.JSONRenderer(),
         ],
@@ -60,6 +69,7 @@ def configure_logging(log_level: int = logging.INFO) -> None:
         external_logger.handlers.clear()
         external_logger.addHandler(handler)
         external_logger.setLevel(level)
+        external_logger.propagate = False
 
     # explicitly set the only handler for the root loggen and uvicorn
     _configure_external_logger(logging.getLogger(), level=log_level)
@@ -69,7 +79,7 @@ def configure_logging(log_level: int = logging.INFO) -> None:
     # clear out existing loggers for harness and filter to warnings
     # this means that harness logging will be configured by the root logger
     harness_logger.handlers.clear()
-    harness_logger.setLevel(logging.WARNING)
+    harness_logger.setLevel(logging.DEBUG)
 
 
 class Settings(BaseSettings):
@@ -95,7 +105,6 @@ def get_client() -> CfClient:
         with_stream_enabled(True),
         with_analytics_enabled(True),
     )
-    client.authenticate()
     return client
 
 
@@ -117,6 +126,11 @@ def healthcheck():
 def startup_event():
     configure_logging()
     get_client()  # try to initialise the client on startup
+    try:
+        raise ValueError("Validating Error Logging")
+    except Exception as e:
+        harness_logger.error("Expected error: %s", e)
+        harness_logger.error(e)
 
 
 @app.on_event("shutdown")
